@@ -8,4 +8,5 @@ My related browser-based repository: [mbafford/browser-tools](https://github.com
 
 # Scripts
 
-- `dates2cal` - Takes date ranges from stdin and outputs a 3 column yearly calendar with represented dates marked on the calendar.
+- `dates2cal` [html version](https://tools.bafford.us/dates2cal) - Takes date ranges from stdin and outputs a 3 column yearly calendar with represented dates marked on the calendar.
+- `summarize_json` [html version](https://tools.bafford.us/summarize-json) - Takes JSON data and provides a summary of the fields, data types, and values represented in.  Syntax similar to [gron](https://github.com/tomnomnom/gron) but more about understanding the full dataset vs. individual records.

@@ -1,0 +1,110 @@
+#!/usr/bin/env python
+# Gives a quick summary of the structure of a JSON file, including the keys, object types, and
+# leaf node types. Provides a count of each data type so you can quickly tell which data points
+# are common.
+#
+# Example:
+#
+# Without values:
+#
+# $ curl -sS 'https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json' | python summarize_json
+# 12196 .{features}[].{geometry}.{coordinates}[][][]   float (12171), int (25)
+#  9232 .{features}[].{geometry}.{coordinates}[][][][] float (9191), int (41)
+#   180 .{features}[].{geometry}.{type}                str (180)
+#   180 .{features}[].{id}                             str (180)
+#   180 .{features}[].{properties}.{name}              str (180)
+#   180 .{features}[].{type}                           str (180)
+#     1 .{type}                                        str (1)
+#
+# With values:
+#
+# $ curl -sS 'https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json' | python summarize_json -v
+# 12196 .{features}[].{geometry}.{coordinates}[][][]   float (12171), int (25)
+#                                                      - 22 (9)
+#                                                      - 25 (9)
+#                                                      - 34.559989 (7)
+#                                                      - 27.656426 (6)
+#                                                      - 61.210817 (5)
+# [...]
+#   180 .{features}[].{geometry}.{type}                str (180)
+#                                                      - Polygon (150)
+#                                                      - MultiPolygon (30)
+# [...]
+#     1 .{type}                                        str (1)
+#                                                      - FeatureCollection (1)
+#
+#
+# From which I can see that I can extract data like this:
+#
+# $ curl -sS 'https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json' | jq '.features[0] | [ .id, .geometry.coordinates[0][0][0:2] ]'
+# [
+#  "AFG",
+#  [
+#    61.210817,
+#    35.650072
+#  ]
+# ]
+
+import sys
+import json
+import fileinput
+from collections import defaultdict, Counter
+
+
+class Summarizer:
+    def __init__(self):
+        self.key_counts = Counter()
+        self.key_types = defaultdict(lambda: Counter())
+        self.key_values = defaultdict(lambda: Counter())
+
+    def summarize(self, data, parent_key=None):
+        parent_key = parent_key or ""
+
+        if isinstance(data, list):
+            for i, item in enumerate(data):
+                self.summarize(item, "%s[]" % (parent_key))
+        elif isinstance(data, dict):
+            for i, item in data.items():
+                self.summarize(item, "%s.{%s}" % (parent_key, i))
+        else:
+            self.key_counts[parent_key] += 1
+            self.key_types[parent_key][type(data).__name__] += 1
+            self.key_values[parent_key][data] += 1
+
+
+if __name__ == "__main__":
+    show_values = False
+    if len(sys.argv) > 1 and (sys.argv[1] == "-v" or sys.argv[1] == "--values"):
+        show_values = True
+        del sys.argv[1]
+
+    raw = "".join(fileinput.input())
+    data = json.loads(raw)
+
+    sum = Summarizer()
+    sum.summarize(data)
+
+    key_length = max([len(key) for key in sum.key_counts.keys()])
+
+    for key in sorted(sum.key_counts.keys()):
+        types = ", ".join(
+            ["%s (%d)" % (t, sum.key_types[key][t]) for t in sum.key_types[key]]
+        )
+        types = types.replace("NoneType", "None")
+
+        print(f"%5d %-{key_length}s %-30s" % (sum.key_counts[key], key, types))
+        if show_values:
+            values = sorted(
+                list(sum.key_values[key].keys()),
+                key=lambda x: sum.key_values[key][x],
+                reverse=True,
+            )
+            for value in values[0:5]:
+                if value is None:
+                    continue
+
+                if value is not None and isinstance(value, str) and len(value) > 30:
+                    value = f"{value[0:27]}..."
+                count = sum.key_values[key][value]
+                print(f"      %{key_length}s - %s (%d)" % ("", value, count))
+            print()
