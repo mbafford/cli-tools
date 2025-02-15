@@ -1,0 +1,207 @@
+#!/usr/bin/env -S uv run -q --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "click>=8.1.7",
+#   "rich>=13.7.0",
+# ]
+# ///
+
+"""
+This script reads date ranges from an input file or stdin and displays them on yearly calendars.
+It supports skipping months that have all dates filled. The input format can be either single dates
+or date ranges in the format YYYY-MM-DD or YYYY-MM-DD-YYYY-MM-DD.
+
+Usage:
+$ echo "2019-01-01-2019-01-15
+2019-01-16-2019-01-31
+2019-02-01-2019-02-15
+2019-02-16-2019-02-28
+2019-03-01-2019-03-15
+2019-03-16-2019-03-31
+2019-04-01-2019-04-15" | dates2cal
+
+----------------------------------------------------------------
+                       2019                        
+----------------------------------------------------------------
+
+      January               February               March          
+Mo Tu We Th Fr Sa Su  Mo Tu We Th Fr Sa Su  Mo Tu We Th Fr Sa Su  
+    *  *  *  *  *  *                *  *  *                *  *  *   
+ *  *  *  *  *  *  *    *  *  *  *  *  *  *    *  *  *  *  *  *  *   
+ *  *  *  *  *  *  *    *  *  *  *  *  *  *    *  *  *  *  *  *  *   
+ *  *  *  *  *  *  *    *  *  *  *  *  *  *    *  *  *  *  *  *  *   
+ *  *  *  *             *  *  *  *             *  *  *  *  *  *  *   
+      
+
+       April                  May                   June          
+Mo Tu We Th Fr Sa Su  Mo Tu We Th Fr Sa Su  Mo Tu We Th Fr Sa Su  
+ *  *  *  *  *  *  *          1  2  3  4  5                   1  2   
+ *  *  *  *  *  *  *    6  7  8  9 10 11 12    3  4  5  6  7  8  9   
+ * 16 17 18 19 20 21   13 14 15 16 17 18 19   10 11 12 13 14 15 16   
+22 23 24 25 26 27 28   20 21 22 23 24 25 26   17 18 19 20 21 22 23   
+29 30                  27 28 29 30 31         24 25 26 27 28 29 30   
+
+[...]
+"""
+
+import sys
+import re
+from datetime import datetime, timedelta
+import calendar
+from typing import List, Tuple, Set, Dict
+import click
+from rich.console import Console
+from rich.theme import Theme
+
+console = Console(theme=Theme({"info": "cyan", "warning": "yellow", "error": "red"}))
+
+def parse_date_line(line: str) -> List[datetime]:
+    """Parse a line containing either a single date or date range."""
+    # Try to match date range pattern first
+    range_pattern = r'(\d{4}-\d{2}-\d{2})-(\d{4}-\d{2}-\d{2})'
+    range_match = re.search(range_pattern, line)
+    
+    if range_match:
+        start_date = datetime.strptime(range_match.group(1), '%Y-%m-%d')
+        end_date = datetime.strptime(range_match.group(2), '%Y-%m-%d')
+        return [start_date, end_date]
+    
+    # Try to match single date pattern
+    single_pattern = r'(\d{4}-\d{2}-\d{2})'
+    single_match = re.search(single_pattern, line)
+    
+    if single_match:
+        date = datetime.strptime(single_match.group(1), '%Y-%m-%d')
+        return [date, date]
+    
+    return []
+
+def get_dates_in_range(start_date: datetime, end_date: datetime) -> Dict[int, Set[Tuple[int, int, int]]]:
+    """Generate all dates between start and end dates inclusive, organized by year."""
+    dates_by_year = {}
+    current_date = start_date
+    
+    while current_date <= end_date:
+        year = current_date.year
+        if year not in dates_by_year:
+            dates_by_year[year] = set()
+        
+        dates_by_year[year].add((current_date.year, current_date.month, current_date.day))
+        current_date += timedelta(days=1)
+    
+    return dates_by_year
+
+def is_month_fully_marked(marked_dates: Set[Tuple[int, int, int]], year: int, month: int) -> bool:
+    """Check if all days in a month are marked."""
+    _, days_in_month = calendar.monthrange(year, month)
+    month_days = {(year, month, day) for day in range(1, days_in_month + 1)}
+    return month_days.issubset(marked_dates)
+
+def print_calendar(marked_dates: Set[Tuple[int, int, int]], year: int, skip_full_months: bool):
+    """Print a yearly calendar with marked dates in three columns."""
+    months_per_row = 3
+    
+    # Filter out fully marked months if requested
+    months_to_print = []
+    for month in range(1, 13):
+        if not skip_full_months or not is_month_fully_marked(marked_dates, year, month):
+            months_to_print.append(month)
+    
+    if not months_to_print:
+        console.print(f"[info]Skipping {year} - all marked months are complete[/info]")
+        return
+    
+    month_rows = (len(months_to_print) + months_per_row - 1) // months_per_row
+    
+    console.print(f"\n{'-' * 64}")
+    console.print(f"[bold]{year}[/bold]".center(64))
+    console.print(f"{'-' * 64}\n")
+    
+    for row in range(month_rows):
+        # Store calendar strings for each month in the row
+        month_calendars = []
+        
+        row_start = row * months_per_row
+        row_end = min((row + 1) * months_per_row, len(months_to_print))
+        
+        for month_idx in range(row_start, row_end):
+            month = months_to_print[month_idx]
+            # Get the calendar for this month
+            cal = calendar.monthcalendar(year, month)
+            
+            # Format month header
+            month_str = f"{calendar.month_name[month]}".center(20) + "\n"
+            month_str += "Mo Tu We Th Fr Sa Su\n"
+            
+            # Format weeks
+            for week in cal:
+                for day in week:
+                    if day == 0:
+                        month_str += "   "
+                    elif (year, month, day) in marked_dates:
+                        month_str += " * "
+                    else:
+                        month_str += f"{day:2d} "
+                month_str += "\n"
+            
+            month_calendars.append(month_str)
+        
+        # Print months in this row side by side
+        month_lines = [cal.split('\n') for cal in month_calendars]
+        max_lines = max(len(lines) for lines in month_lines)
+        
+        # Pad shorter months with empty lines
+        for lines in month_lines:
+            while len(lines) < max_lines:
+                lines.append(" " * 20)
+        
+        # Print each line of all months in the row
+        for line_idx in range(max_lines):
+            for month_idx in range(len(month_calendars)):
+                console.print(month_lines[month_idx][line_idx], end="  ")
+            console.print()
+        console.print()
+
+@click.command()
+@click.option('--skip-full-months', is_flag=True, help='Skip printing months that have all dates filled')
+@click.option('--input-file', '-i', type=click.File('r'), default='-',
+              help='Input file with date ranges (default: STDIN)')
+def main(skip_full_months: bool, input_file: click.File):
+    """Process date ranges and display them on yearly calendars.
+    
+    Input format: One date or date range per line
+    - Single date: YYYY-MM-DD
+    - Date range: YYYY-MM-DD-YYYY-MM-DD
+    """
+    dates_by_year = {}
+    
+    # Read from input file or stdin
+    for line in input_file:
+        line = line.strip()
+        if not line:
+            continue
+        
+        dates = parse_date_line(line)
+        if not dates:
+            console.print(f"[warning]Skipping invalid line: {line}[/warning]")
+            continue
+        
+        # Get all dates in the range, organized by year
+        range_dates = get_dates_in_range(dates[0], dates[1])
+        
+        # Merge the dates into our main dictionary
+        for year, dates in range_dates.items():
+            if year not in dates_by_year:
+                dates_by_year[year] = set()
+            dates_by_year[year].update(dates)
+    
+    # Print calendars for each year in chronological order
+    if dates_by_year:
+        for year in sorted(dates_by_year.keys()):
+            print_calendar(dates_by_year[year], year, skip_full_months)
+    else:
+        console.print("[error]No valid dates found in input[/error]")
+
+if __name__ == "__main__":
+    main()

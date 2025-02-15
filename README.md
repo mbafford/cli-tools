@@ -6,3 +6,6 @@ Mostly Python scripts. Increasingly Python scripts designed around [uv](https://
 
 My related browser-based repository: [mbafford/browser-tools](https://github.com/mbafford/browser-tools) - some scripts here have HTML "run anywhere" versions there.
 
+# Scripts
+
+- `dates2cal` - Takes date ranges from stdin and outputs a 3 column yearly calendar with represented dates marked on the calendar.
